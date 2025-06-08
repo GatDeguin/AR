@@ -74,20 +74,21 @@ export default function App() {
     });
 
     let stopVision = false;
+    let visionInterval;
     (async () => {
       await loadOpenCV();
-      const interval = setInterval(() => {
+      visionInterval = setInterval(() => {
         if (stopVision || !videoRef.current) return;
         try {
           const frets = detectFrets(videoRef.current);
           drawFrets(frets);
         } catch {}
       }, 1500);
-      return () => clearInterval(interval);
     })();
 
     return () => {
       stopVision = true;
+      clearInterval(visionInterval);
       renderer.dispose();
     };
   }, [xrSupported]);
