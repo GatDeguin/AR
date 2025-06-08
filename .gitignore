@@ -1,15 +1,4 @@
-# Node and build
 node_modules
+package-lock.json
 dist
 /build
-
-# Python
-__pycache__/
-*.pyc
-poetry.lock
-
-# Docker
-*.log
-
-# OS
-.DS_Store
