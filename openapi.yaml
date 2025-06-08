@@ -1,0 +1,100 @@
+openapi: 3.1.0
+info:
+  title: Guitarra Tutor API
+  version: 0.1.0
+servers:
+  - url: https://api.guitarratutor.com
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    Error:
+      type: object
+      properties:
+        detail:
+          type: string
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+    LoginResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+        token_type:
+          type: string
+          enum: [bearer]
+    RegisterRequest:
+      allOf:
+        - $ref: '#/components/schemas/LoginRequest'
+        - type: object
+          required: [username]
+          properties:
+            username:
+              type: string
+    UserProfile:
+      type: object
+      properties:
+        id: { type: integer }
+        username: { type: string }
+        email: { type: string, format: email }
+        preferred_key: { type: string }
+        preferred_scale: { type: string }
+        level: { type: string, enum: [Beginner, Intermediate, Advanced] }
+    UpdateProfileRequest:
+      type: object
+      properties:
+        preferred_key: { type: string }
+        preferred_scale: { type: string }
+        level:
+          type: string
+    ProgressEntry:
+      type: object
+      properties:
+        id: { type: integer }
+        exercise_id: { type: integer }
+        score: { type: number, format: float }
+        accuracy: { type: number, format: float }
+        created_at: { type: string, format: date-time }
+    Exercise:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        description: { type: string }
+        difficulty: { type: string, enum: [Easy, Medium, Hard] }
+security:
+  - BearerAuth: []
+paths:
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      summary: Login de usuario
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200': { description: JWT emitido correctamente }
+  /api/auth/register:
+    post:
+      tags: [Auth]
+      summary: Registro de usuario
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+      responses:
+        '201': { description: Usuario creado }
