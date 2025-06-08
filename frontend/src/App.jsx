@@ -4,11 +4,13 @@ import { Button } from "./components/ui/button.jsx";
 import { loadOpenCV, detectFrets } from "./vision/fretDetection.js";
 import { usePoseCalibration } from "./hooks/usePoseCalibration.js";
 import { createScaleOverlay } from "./overlays/scaleOverlay.js";
-const STANDARD_TUNING=[40,45,50,55,59,64],MAJOR_PATTERN=[0,2,4,5,7,9,11],KEYS=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+import { createChordOverlay } from "./overlays/chordOverlay.js";
+import { createPracticeOverlay } from "./overlays/practiceOverlay.js";
+const STANDARD_TUNING=[40,45,50,55,59,64],MAJOR_PATTERN=[0,2,4,5,7,9,11],KEYS=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"],CHORDS={major:[0,4,7],minor:[0,3,7]};
 function noteNameToMidi(n){return 60+KEYS.indexOf(n);}
 export default function App(){
   const cR=useRef(),vR=useRef(),gR=useRef(),oR=useRef();
-  const [mode,setMode]=useState("scales"),[curK,setCurK]=useState("C"),[xrOK,setXrOK]=useState(false);
+  const [mode,setMode]=useState("scales"),[curK,setCurK]=useState("C"),[chK,setChK]=useState("C"),[chT,setChT]=useState("major"),[bpm,setBpm]=useState(60),[xrOK,setXrOK]=useState(false);
   const {poseMatrix4,calibrated,retry,error}=usePoseCalibration(vR);
   useEffect(()=>{
     if(vR.current)navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}}).then(s=>{vR.current.srcObject=s;vR.current.play();});
@@ -38,11 +40,15 @@ export default function App(){
   },[calibrated,poseMatrix4]);
   useEffect(()=>{
     if(!calibrated||!gR.current)return;
+    if(oR.current){gR.current.remove(oR.current.group);oR.current.dispose&&oR.current.dispose();oR.current=null;}
     if(mode==="scales"){
-      if(!oR.current)oR.current=createScaleOverlay({scene:gR.current,tuning:STANDARD_TUNING,key:noteNameToMidi(curK),scalePattern:MAJOR_PATTERN,fretCount:15});
-      else oR.current.updateKey(noteNameToMidi(curK));
-    } else{if(oR.current){gR.current.remove(oR.current.group);oR.current=null;}}
-  },[mode,curK,calibrated]);
+      oR.current=createScaleOverlay({scene:gR.current,tuning:STANDARD_TUNING,key:noteNameToMidi(curK),scalePattern:MAJOR_PATTERN,fretCount:15});
+    }else if(mode==="chords"){
+      oR.current=createChordOverlay({scene:gR.current,tuning:STANDARD_TUNING,key:noteNameToMidi(chK),chordPattern:CHORDS[chT],fretCount:15});
+    }else if(mode==="practice"){
+      oR.current=createPracticeOverlay({scene:gR.current,bpm:bpm});
+    }
+  },[mode,curK,chK,chT,bpm,calibrated]);
   const ModeButton=({id,label,icon})=> 
     <Button className={`flex-1 ${mode===id?"bg-indigo-600 text-white":"bg-gray-100"}`} onClick={()=>setMode(id)}>{icon} {label}</Button>;
   if(!xrOK) return <div className="h-screen flex items-center justify-center bg-black text-white"><p>No soporta WebXR AR.</p></div>;
@@ -55,6 +61,19 @@ export default function App(){
     {mode==="scales"&&calibrated&&<select value={curK} onChange={e=>setCurK(e.target.value)} className="absolute top-4 right-4 bg-white/80 rounded-lg px-2 py-1 text-sm">
       {KEYS.map(k=><option key={k} value={k}>{k}</option>)}
     </select>}
+    {mode==="chords"&&calibrated&&<div className="absolute top-4 right-4 flex gap-2 bg-white/80 rounded-lg px-2 py-1 text-sm">
+      <select value={chK} onChange={e=>setChK(e.target.value)} className="bg-transparent">
+        {KEYS.map(k=><option key={k} value={k}>{k}</option>)}
+      </select>
+      <select value={chT} onChange={e=>setChT(e.target.value)} className="bg-transparent">
+        <option value="major">Maj</option>
+        <option value="minor">Min</option>
+      </select>
+    </div>}
+    {mode==="practice"&&calibrated&&<div className="absolute top-4 right-4 flex items-center gap-2 bg-white/80 rounded-lg px-2 py-1 text-sm">
+      <label htmlFor="bpm">BPM</label>
+      <input id="bpm" type="number" min="30" max="200" value={bpm} onChange={e=>setBpm(parseInt(e.target.value)||60)} className="w-16 rounded bg-white text-black px-1" />
+    </div>}
     <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2 w-11/12 max-w-md">
       <ModeButton id="scales" label="Escalas" icon="🎼" />
       <ModeButton id="chords" label="Acordes" icon="🎸" />
