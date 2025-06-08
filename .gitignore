@@ -1,0 +1,15 @@
+# Node and build
+node_modules
+dist
+/build
+
+# Python
+__pycache__/
+*.pyc
+poetry.lock
+
+# Docker
+*.log
+
+# OS
+.DS_Store
