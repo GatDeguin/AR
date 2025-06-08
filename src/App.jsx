@@ -4,10 +4,15 @@ import { Button } from "@/components/ui/button";
 import { loadOpenCV, detectFrets } from "./vision/fretDetection.js";
 import { usePoseCalibration } from "./hooks/usePoseCalibration.js";
 import { createScaleOverlay } from "./overlays/scaleOverlay.js";
+import { createChordOverlay } from "./overlays/chordOverlay.js";
 
 const STANDARD_TUNING = [40, 45, 50, 55, 59, 64];
 const MAJOR_PATTERN = [0, 2, 4, 5, 7, 9, 11];
 const KEYS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+const CHORD_PATTERNS = {
+  major: [0, 4, 7],
+  minor: [0, 3, 7],
+};
 
 function noteNameToMidi(name) {
   const idx = KEYS.indexOf(name);
@@ -22,6 +27,9 @@ export default function App() {
 
   const [mode, setMode] = useState("scales");
   const [currentKey, setCurrentKey] = useState("C");
+  const [chordType, setChordType] = useState("major");
+  const [metronomeOn, setMetronomeOn] = useState(false);
+  const [tick, setTick] = useState(0);
   const [xrSupported, setXrSupported] = useState(false);
 
   const { poseMatrix4, calibrated, retry, error } = usePoseCalibration(videoRef);
@@ -101,10 +109,13 @@ export default function App() {
 
   useEffect(() => {
     if (!calibrated || !fretGroupRef.current) return;
+
+    const group = fretGroupRef.current;
+
     if (mode === "scales") {
       if (!overlayRef.current) {
         overlayRef.current = createScaleOverlay({
-          scene: fretGroupRef.current,
+          scene: group,
           tuning: STANDARD_TUNING,
           key: noteNameToMidi(currentKey),
           scalePattern: MAJOR_PATTERN,
@@ -113,13 +124,39 @@ export default function App() {
       } else {
         overlayRef.current.updateKey(noteNameToMidi(currentKey));
       }
+    } else if (mode === "chords") {
+      if (!overlayRef.current) {
+        overlayRef.current = createChordOverlay({
+          scene: group,
+          tuning: STANDARD_TUNING,
+          key: noteNameToMidi(currentKey),
+          pattern: CHORD_PATTERNS[chordType],
+          fretCount: 15,
+        });
+      } else {
+        overlayRef.current.update(
+          noteNameToMidi(currentKey),
+          CHORD_PATTERNS[chordType]
+        );
+      }
     } else {
       if (overlayRef.current) {
-        fretGroupRef.current.remove(overlayRef.current.group);
+        group.remove(overlayRef.current.group);
         overlayRef.current = null;
       }
     }
-  }, [mode, currentKey, calibrated]);
+  }, [mode, currentKey, chordType, calibrated]);
+
+  useEffect(() => {
+    if (!metronomeOn) {
+      return;
+    }
+    setTick(0);
+    const interval = setInterval(() => {
+      setTick((t) => t + 1);
+    }, 600);
+    return () => clearInterval(interval);
+  }, [metronomeOn]);
 
   const ModeButton = ({ id, label, icon }) => (
     <Button
@@ -157,18 +194,38 @@ export default function App() {
           )}
         </div>
       )}
-      {mode === "scales" && calibrated && (
-        <select
-          value={currentKey}
-          onChange={(e) => setCurrentKey(e.target.value)}
-          className="absolute top-4 right-4 bg-white/80 rounded-lg px-2 py-1 text-sm"
-        >
-          {KEYS.map((k) => (
-            <option key={k} value={k}>
-              {k}
-            </option>
-          ))}
-        </select>
+      {(mode === "scales" || mode === "chords") && calibrated && (
+        <div className="absolute top-4 right-4 flex gap-2 bg-white/80 rounded-lg px-2 py-1 text-sm">
+          <select
+            value={currentKey}
+            onChange={(e) => setCurrentKey(e.target.value)}
+            className="bg-transparent"
+          >
+            {KEYS.map((k) => (
+              <option key={k} value={k}>
+                {k}
+              </option>
+            ))}
+          </select>
+          {mode === "chords" && (
+            <select
+              value={chordType}
+              onChange={(e) => setChordType(e.target.value)}
+              className="bg-transparent"
+            >
+              <option value="major">maj</option>
+              <option value="minor">min</option>
+            </select>
+          )}
+        </div>
+      )}
+      {mode === "practice" && (
+        <div className="absolute top-4 right-4 bg-white/80 rounded-lg px-3 py-1 text-sm flex items-center gap-2">
+          <Button size="sm" onClick={() => setMetronomeOn(!metronomeOn)}>
+            {metronomeOn ? 'Stop' : 'Start'}
+          </Button>
+          <span>{tick}</span>
+        </div>
       )}
       <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2 w-11/12 max-w-md">
         <ModeButton id="scales" label="Escalas" icon="🎼" />
