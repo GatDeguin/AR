@@ -12,4 +12,8 @@ export default defineConfig({
   server: {
     https: false,
   },
+  test: {
+    environment: "jsdom",
+    setupFiles: "./vitest.setup.js",
+  },
 });
