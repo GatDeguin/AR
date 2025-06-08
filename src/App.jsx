@@ -4,9 +4,15 @@ import { Button } from "@/components/ui/button";
 import { loadOpenCV, detectFrets } from "./vision/fretDetection.js";
 import { usePoseCalibration } from "./hooks/usePoseCalibration.js";
 import { createScaleOverlay } from "./overlays/scaleOverlay.js";
+import { createChordOverlay } from "./overlays/chordOverlay.js";
+import { createPracticeOverlay } from "./overlays/practiceOverlay.js";
 
 const STANDARD_TUNING = [40, 45, 50, 55, 59, 64];
 const MAJOR_PATTERN = [0, 2, 4, 5, 7, 9, 11];
+const CHORD_PATTERNS = {
+  major: [0, 4, 7],
+  minor: [0, 3, 7],
+};
 const KEYS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
 function noteNameToMidi(name) {
@@ -22,6 +28,9 @@ export default function App() {
 
   const [mode, setMode] = useState("scales");
   const [currentKey, setCurrentKey] = useState("C");
+  const [chordKey, setChordKey] = useState("C");
+  const [chordType, setChordType] = useState("major");
+  const [practiceBpm, setPracticeBpm] = useState(60);
   const [xrSupported, setXrSupported] = useState(false);
 
   const { poseMatrix4, calibrated, retry, error } = usePoseCalibration(videoRef);
@@ -101,25 +110,36 @@ export default function App() {
 
   useEffect(() => {
     if (!calibrated || !fretGroupRef.current) return;
-    if (mode === "scales") {
-      if (!overlayRef.current) {
-        overlayRef.current = createScaleOverlay({
-          scene: fretGroupRef.current,
-          tuning: STANDARD_TUNING,
-          key: noteNameToMidi(currentKey),
-          scalePattern: MAJOR_PATTERN,
-          fretCount: 15,
-        });
-      } else {
-        overlayRef.current.updateKey(noteNameToMidi(currentKey));
-      }
-    } else {
-      if (overlayRef.current) {
-        fretGroupRef.current.remove(overlayRef.current.group);
-        overlayRef.current = null;
-      }
+
+    if (overlayRef.current) {
+      fretGroupRef.current.remove(overlayRef.current.group);
+      overlayRef.current.dispose?.();
+      overlayRef.current = null;
     }
-  }, [mode, currentKey, calibrated]);
+
+    if (mode === "scales") {
+      overlayRef.current = createScaleOverlay({
+        scene: fretGroupRef.current,
+        tuning: STANDARD_TUNING,
+        key: noteNameToMidi(currentKey),
+        scalePattern: MAJOR_PATTERN,
+        fretCount: 15,
+      });
+    } else if (mode === "chords") {
+      overlayRef.current = createChordOverlay({
+        scene: fretGroupRef.current,
+        tuning: STANDARD_TUNING,
+        key: noteNameToMidi(chordKey),
+        chordPattern: CHORD_PATTERNS[chordType],
+        fretCount: 15,
+      });
+    } else if (mode === "practice") {
+      overlayRef.current = createPracticeOverlay({
+        scene: fretGroupRef.current,
+        bpm: practiceBpm,
+      });
+    }
+  }, [mode, currentKey, chordKey, chordType, practiceBpm, calibrated]);
 
   const ModeButton = ({ id, label, icon }) => (
     <Button
@@ -169,6 +189,43 @@ export default function App() {
             </option>
           ))}
         </select>
+      )}
+      {mode === "chords" && calibrated && (
+        <div className="absolute top-4 right-4 flex gap-2 bg-white/80 rounded-lg px-2 py-1 text-sm">
+          <select
+            value={chordKey}
+            onChange={(e) => setChordKey(e.target.value)}
+            className="bg-transparent"
+          >
+            {KEYS.map((k) => (
+              <option key={k} value={k}>
+                {k}
+              </option>
+            ))}
+          </select>
+          <select
+            value={chordType}
+            onChange={(e) => setChordType(e.target.value)}
+            className="bg-transparent"
+          >
+            <option value="major">Maj</option>
+            <option value="minor">Min</option>
+          </select>
+        </div>
+      )}
+      {mode === "practice" && calibrated && (
+        <div className="absolute top-4 right-4 flex items-center gap-2 bg-white/80 rounded-lg px-2 py-1 text-sm">
+          <label htmlFor="bpm">BPM</label>
+          <input
+            id="bpm"
+            type="number"
+            min="30"
+            max="200"
+            value={practiceBpm}
+            onChange={(e) => setPracticeBpm(parseInt(e.target.value) || 60)}
+            className="w-16 rounded bg-white text-black px-1"
+          />
+        </div>
       )}
       <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2 w-11/12 max-w-md">
         <ModeButton id="scales" label="Escalas" icon="🎼" />
