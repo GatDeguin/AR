@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { loadOpenCV, detectFrets } from "./vision/fretDetection.js";
 import { usePoseCalibration } from "./hooks/usePoseCalibration.js";
 import { createScaleOverlay } from "./overlays/scaleOverlay.js";
+import { useI18n } from "./i18n.js";
 
 const STANDARD_TUNING = [40, 45, 50, 55, 59, 64];
 const MAJOR_PATTERN = [0, 2, 4, 5, 7, 9, 11];
@@ -19,10 +20,12 @@ export default function App() {
   const videoRef = useRef(null);
   const fretGroupRef = useRef(null);
   const overlayRef = useRef(null);
+  const { t, lang, setLang } = useI18n();
 
   const [mode, setMode] = useState("scales");
   const [currentKey, setCurrentKey] = useState("C");
   const [xrSupported, setXrSupported] = useState(false);
+  const [cameraError, setCameraError] = useState(null);
 
   const { poseMatrix4, calibrated, retry, error } = usePoseCalibration(videoRef);
 
@@ -33,8 +36,9 @@ export default function App() {
       .then((stream) => {
         videoRef.current.srcObject = stream;
         videoRef.current.play();
-      });
-  }, []);
+      })
+      .catch(() => setCameraError(t("errors.no_camera")));
+  }, [t]);
 
   useEffect(() => {
     if (navigator.xr) navigator.xr.isSessionSupported("immersive-ar").then(setXrSupported);
@@ -134,7 +138,7 @@ export default function App() {
   if (!xrSupported) {
     return (
       <div className="h-screen w-screen flex items-center justify-center bg-black text-white">
-        <p>Tu navegador no soporta WebXR AR.</p>
+        <p>{t("browserUnsupported")}</p>
       </div>
     );
   }
@@ -143,17 +147,28 @@ export default function App() {
     <div className="relative h-screen w-screen overflow-hidden">
       <video ref={videoRef} className="hidden" playsInline />
       <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
+      <select
+        value={lang}
+        onChange={(e) => setLang(e.target.value)}
+        className="absolute top-4 left-4 bg-white/80 rounded-lg px-2 py-1 text-sm"
+      >
+        <option value="es">ES</option>
+        <option value="en">EN</option>
+      </select>
       {!calibrated && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur rounded-xl px-4 py-2 text-sm text-white">
-          {error ? (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur rounded-xl px-4 py-2 text-sm text-white flex items-center gap-2">
+          {error || cameraError ? (
             <>
-              Error calibrando: {error}
+              {t("errorCalibrating")} {error || cameraError}
               <Button size="sm" variant="ghost" className="ml-2 underline" onClick={retry}>
-                Reintentar
+                {t("retry")}
               </Button>
             </>
           ) : (
-            "Calibrando… mueve la cámara para enfocar todo el mástil"
+            <>
+              <span className="inline-block h-3 w-3 rounded-full border-2 border-white border-t-transparent animate-spin" />
+              {t("calibrating")}
+            </>
           )}
         </div>
       )}
@@ -171,9 +186,9 @@ export default function App() {
         </select>
       )}
       <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2 w-11/12 max-w-md">
-        <ModeButton id="scales" label="Escalas" icon="🎼" />
-        <ModeButton id="chords" label="Acordes" icon="🎸" />
-        <ModeButton id="practice" label="Practice" icon="⏱" />
+        <ModeButton id="scales" label={t("modes.scales")} icon="🎼" />
+        <ModeButton id="chords" label={t("modes.chords") } icon="🎸" />
+        <ModeButton id="practice" label={t("modes.practice") } icon="⏱" />
       </div>
     </div>
   );
