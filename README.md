@@ -3,7 +3,7 @@
 Aplicación web de realidad aumentada para superponer escalas, acordes y ejercicios sobre tu guitarra en tiempo real.
 
 ## Estructura
-- **frontend/**: Proyecto React + Vite + Tailwind + Three.js + WebXR.
+- **src/**: Proyecto React + Vite + Tailwind + Three.js + WebXR.
 - **backend/**: API FastAPI con PostgreSQL y MongoDB.
 - **infra/**: Docker Compose y Nginx.
 - **.github/**: CI con GitHub Actions.
