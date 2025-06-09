@@ -1,147 +1,209 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>HandTracker Fullscreen - Mirrored View</title>
-  <!-- OpenCV.js -->
-  <script src="https://docs.opencv.org/4.7.0/opencv.js"></script>
-  <!-- Mediapipe Drawing Utils and Hands -->
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <title>Página Ultra 3D Mejorada</title>
   <style>
-    html, body { margin: 0; padding: 0; overflow: hidden; background: #000; }
-    #output_canvas { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; }
-    #error_overlay { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; display: flex;
-      align-items: center; justify-content: center; background: rgba(0,0,0,0.7);
-      color: #fff; font-size: 1.5em; text-align: center; padding: 20px; visibility: hidden;
-      white-space: pre-wrap; }
-    video#input_video { display: none; }
+    :root {
+      --primary-1: #ff416c;
+      --primary-2: #ff4b2b;
+      --glow: rgba(255, 75, 43, 0.6);
+      --text-color: #ffffff;
+    }
+    /* Cinematic animated gradient background + parallax */
+    body {
+      margin: 0;
+      height: 100vh;
+      overflow: hidden;
+      font-family: 'Poppins', sans-serif;
+      background: linear-gradient(45deg, #0f0c29, #302b63, #24243e, #0f0c29);
+      background-size: 600% 600%;
+      animation: bg-pan 20s ease infinite;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      perspective: 1400px;
+      transform-style: preserve-3d;
+    }
+    /* Depth vignette overlay */
+    body::before {
+      content: "";
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+      background: radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.8) 100%);
+      mix-blend-mode: multiply;
+    }
+    @keyframes bg-pan {
+      0% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+    /* Subtle floating particles */
+    .particles {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      overflow: hidden;
+      pointer-events: none;
+    }
+    .particles span {
+      position: absolute;
+      bottom: -20px;
+      background: rgba(255,255,255,0.15);
+      border-radius: 50%;
+      animation: particle-rise linear infinite;
+    }
+    @keyframes particle-rise {
+      0% { transform: translateY(0) scale(0.3); opacity: 1; }
+      100% { transform: translateY(-110vh) scale(1); opacity: 0; }
+    }
+    .container {
+      display: flex;
+      gap: 60px;
+      transform-style: preserve-3d;
+      transition: transform 0.2s ease-out;
+      z-index: 1;
+    }
+    .btn-wrapper {
+      position: relative;
+      transform-style: preserve-3d;
+      animation: float 4s ease-in-out infinite;
+    }
+    @keyframes float {
+      0%, 100% { transform: translateY(0px); }
+      50% { transform: translateY(-15px); }
+    }
+    .btn3d {
+      position: relative;
+      display: inline-block;
+      padding: 20px 50px;
+      color: var(--text-color);
+      text-decoration: none;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      font-weight: 700;
+      background: linear-gradient(145deg, var(--primary-1), var(--primary-2));
+      border-radius: 18px;
+      box-shadow:
+        0 25px 50px rgba(0,0,0,0.5),
+        inset 0 2px 6px rgba(255,255,255,0.2),
+        0 0 25px var(--glow);
+      transform-style: preserve-3d;
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+      overflow: hidden;
+      cursor: pointer;
+    }
+    /* Depth reflection beneath */
+    .btn3d::after {
+      content: "";
+      position: absolute;
+      bottom: -8px;
+      left: 50%;
+      transform: translateX(-50%) skewX(45deg) rotateX(80deg);
+      width: 70%;
+      height: 10px;
+      background: var(--glow);
+      filter: blur(8px);
+      opacity: 0.7;
+      z-index: -1;
+    }
+    /* Shine/glare effect */
+    .btn3d::before {
+      content: "";
+      position: absolute;
+      top: 0; left: -100%;
+      width: 100%; height: 100%;
+      background: linear-gradient(to right, rgba(255,255,255,0.7) 0%, rgba(255,255,255,0.1) 50%, rgba(255,255,255,0.7) 100%);
+      transform: skewX(-30deg);
+      transition: transform 0.7s ease;
+    }
+    .btn-wrapper:hover .btn3d::before {
+      transform: translateX(350%) skewX(-30deg);
+    }
+    /* Hover and active states */
+    .btn-wrapper:hover .btn3d {
+      transform: scale(1.15) rotateX(12deg) rotateY(12deg);
+      box-shadow:
+        0 35px 70px rgba(0,0,0,0.6),
+        inset 0 6px 8px rgba(255,255,255,0.3),
+        0 0 40px var(--glow);
+    }
+    .btn3d:active {
+      transform: scale(0.9);
+      box-shadow:
+        0 15px 30px rgba(0,0,0,0.3),
+        inset 0 2px 4px rgba(255,255,255,0.2),
+        0 0 20px var(--glow);
+    }
+    /* Ripple click effect */
+    .ripple {
+      position: absolute;
+      border-radius: 50%;
+      transform: scale(0);
+      background: rgba(255,255,255,0.6);
+      animation: ripple 0.6s ease-out;
+      pointer-events: none;
+    }
+    @keyframes ripple {
+      to { transform: scale(4); opacity: 0; }
+    }
   </style>
 </head>
 <body>
-  <canvas id="output_canvas"></canvas>
-  <div id="error_overlay"></div>
-  <video id="input_video" playsinline muted autoplay></video>
-
+  <div class="particles"></div>
+  <div class="container">
+    <div class="btn-wrapper"><a href="index1.html" class="btn3d">Index 1</a></div>
+    <div class="btn-wrapper"><a href="index2.html" class="btn3d">Index 2</a></div>
+    <div class="btn-wrapper"><a href="index3.html" class="btn3d">Index 3</a></div>
+  </div>
   <script>
-    const fingerColors = {
-      thumb: '#FF0000', index: '#00FF00', middle: '#0000FF',
-      ring: '#FFFF00', pinky: '#FF00FF'
-    };
-
-    let canvasElement, canvasCtx, hands;
-
-    function showError(msg) {
-      const overlay = document.getElementById('error_overlay');
-      overlay.textContent = msg;
-      overlay.style.visibility = 'visible';
+    // Generate floating particles dynamically
+    const particlesContainer = document.querySelector('.particles');
+    const particleCount = 40;
+    for (let i = 0; i < particleCount; i++) {
+      const span = document.createElement('span');
+      const size = Math.random() * 8 + 4;
+      span.style.width = `${size}px`;
+      span.style.height = `${size}px`;
+      span.style.left = `${Math.random() * 100}%`;
+      span.style.animationDuration = `${Math.random() * 10 + 10}s`;
+      span.style.animationDelay = `${Math.random() * -10}s`;
+      particlesContainer.appendChild(span);
     }
-
-    function init() {
-      canvasElement = document.getElementById('output_canvas');
-      canvasCtx = canvasElement.getContext('2d');
-      hands = new Hands({ locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
-      hands.setOptions({ maxNumHands: 2, modelComplexity: 1,
-        minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
-      hands.onResults(onResults);
-      cv['onRuntimeInitialized'] = startCamera;
-      window.addEventListener('resize', resizeCanvas);
-      resizeCanvas();
-    }
-
-    function resizeCanvas() {
-      canvasElement.width = window.innerWidth;
-      canvasElement.height = window.innerHeight;
-    }
-
-    async function startCamera() {
-      const video = document.getElementById('input_video');
-      const constraints = {
-        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
-        audio: false
-      };
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        video.srcObject = stream;
-        await video.play();
-        requestAnimationFrame(processFrame);
-      } catch (err) {
-        try {
-          const fallback = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-          video.srcObject = fallback;
-          await video.play();
-          requestAnimationFrame(processFrame);
-        } catch (err2) {
-          showError('No se pudo acceder a la cámara: ' + err2.name + '\nRevisa permisos o cierra otras apps.');
-        }
-      }
-    }
-
-    async function processFrame() {
-      const video = document.getElementById('input_video');
-      if (!hands || !video.videoWidth) {
-        requestAnimationFrame(processFrame);
-        return;
-      }
-      await hands.send({ image: video });
-      requestAnimationFrame(processFrame);
-    }
-
-    function drawCustomConnectors(ctx, landmarks, vw, vh) {
-      ctx.strokeStyle = '#00FF00'; ctx.lineWidth = 2;
-      HAND_CONNECTIONS.forEach(([start, end]) => {
-        const lm1 = landmarks[start], lm2 = landmarks[end];
-        ctx.beginPath();
-        ctx.moveTo(lm1.x * vw, lm1.y * vh);
-        ctx.lineTo(lm2.x * vw, lm2.y * vh);
-        ctx.stroke();
+    // Container parallax based on mouse
+    const container = document.querySelector('.container');
+    document.body.addEventListener('mousemove', e => {
+      const x = (e.clientX / window.innerWidth) - 0.5;
+      const y = (e.clientY / window.innerHeight) - 0.5;
+      container.style.transform = `rotateX(${y * 8}deg) rotateY(${x * 8}deg)`;
+    });
+    // Button interactions
+    document.querySelectorAll('.btn-wrapper').forEach(wrapper => {
+      const btn = wrapper.querySelector('.btn3d');
+      // Tilt microinteraction
+      wrapper.addEventListener('mousemove', e => {
+        const rect = wrapper.getBoundingClientRect();
+        const dx = e.clientX - rect.left - rect.width/2;
+        const dy = e.clientY - rect.top - rect.height/2;
+        btn.style.transform = `scale(1.15) rotateX(${dy/rect.height*12}deg) rotateY(${dx/rect.width*12}deg)`;
       });
-    }
-
-    function drawColoredLandmarks(ctx, landmarks, vw, vh) {
-      landmarks.forEach((lm, i) => {
-        const x = lm.x * vw, y = lm.y * vh;
-        let color = '#FFFFFF';
-        if (i >= 1 && i <= 4) color = fingerColors.thumb;
-        else if (i >= 5 && i <= 8) color = fingerColors.index;
-        else if (i >= 9 && i <= 12) color = fingerColors.middle;
-        else if (i >= 13 && i <= 16) color = fingerColors.ring;
-        else if (i >= 17 && i <= 20) color = fingerColors.pinky;
-        ctx.beginPath(); ctx.arc(x, y, 8, 0, 2 * Math.PI); ctx.fillStyle = color; ctx.fill();
+      wrapper.addEventListener('mouseleave', () => btn.style.transform = '');
+      // Ripple on click
+      btn.addEventListener('click', e => {
+        const circle = document.createElement('span');
+        const d = Math.max(btn.clientWidth, btn.clientHeight);
+        circle.style.width = circle.style.height = `${d}px`;
+        circle.style.left = `${e.clientX - btn.offsetLeft - d/2}px`;
+        circle.style.top = `${e.clientY - btn.offsetTop - d/2}px`;
+        circle.classList.add('ripple');
+        const existing = btn.querySelector('.ripple');
+        if (existing) existing.remove();
+        btn.appendChild(circle);
       });
-    }
-
-    function onResults(results) {
-      const video = document.getElementById('input_video');
-      const vw = video.videoWidth, vh = video.videoHeight;
-      const cw = canvasElement.width, ch = canvasElement.height;
-      const scale = Math.min(cw / vw, ch / vh);
-      const dw = vw * scale, dh = vh * scale;
-      const dx = (cw - dw) / 2, dy = (ch - dh) / 2;
-
-      // Mirror entire canvas horizontally
-      canvasCtx.save();
-      canvasCtx.translate(cw, 0);
-      canvasCtx.scale(-1, 1);
-
-      // Clear and draw video frame
-      canvasCtx.clearRect(0, 0, cw, ch);
-      canvasCtx.drawImage(video, 0, 0, vw, vh, dx, dy, dw, dh);
-
-      const handsLandmarks = results.multiHandLandmarks || [];
-      canvasCtx.save();
-      canvasCtx.translate(dx, dy);
-      canvasCtx.scale(scale, scale);
-      handsLandmarks.forEach(landmarks => {
-        drawCustomConnectors(canvasCtx, landmarks, vw, vh);
-        drawColoredLandmarks(canvasCtx, landmarks, vw, vh);
-      });
-      canvasCtx.restore();
-      canvasCtx.restore();
-    }
-
-    window.addEventListener('load', init);
+    });
   </script>
 </body>
 </html>
