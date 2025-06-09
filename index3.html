@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Piano 3D + Mano (calibración con pulgar‑índice)</title>
+  <style>
+    html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#111;font-family:system-ui,sans-serif}
+    canvas,video{position:absolute;top:0;left:0;width:100vw;height:100vh}
+    #threeCanvas{z-index:5}
+    #output_canvas{z-index:1}
+    video{display:none}
+    #msg{position:absolute;top:10px;left:50%;transform:translateX(-50%);padding:.4em .8em;background:#ffffffcc;color:#000;border-radius:.4em;font-weight:600;z-index:10;pointer-events:none}
+  </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js"
+    }
+  }
+  </script>
+  <!-- Mediapipe (global) -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+</head>
+<body>
+  <div id="msg">Extiende <b>pulgar + índice</b> de ambas manos y mantenlos 2 s para calibrar</div>
+  <canvas id="output_canvas"></canvas>
+  <canvas id="threeCanvas"></canvas>
+  <video id="input_video" playsinline muted autoplay></video>
+
+<script type="module">
+/* ----------------------------------------------------------
+   Piano 3D Interactivo – calibración con pares Pulgar/Índice
+   Sostén la postura (pulgar‑índice abiertos) 2 s en cada mano.
+   ---------------------------------------------------------- */
+import * as THREE from 'three';
+import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.155.0/examples/jsm/controls/OrbitControls.js';
+import * as Tone from 'https://cdn.jsdelivr.net/npm/tone@14.8.39/+esm';
+
+// ─── Constantes del teclado ──────────────────────────────────────────
+const WHITE_NOTES = ['C4','D4','E4','F4','G4','A4','B4'];
+const BLACK_NOTES = ['C#4','D#4','F#4','G#4','A#4'];
+const BLACK_OFFSET = [0,1,3,4,5];
+const WHITE_W = 1.2, WHITE_H = 0.6, WHITE_D = 5.5;
+const BLACK_W = 0.8, BLACK_H = 0.6, BLACK_D = 3.2;
+const KEY_SPACING = 1.35;
+const TOTAL_WHITE_WIDTH = (WHITE_NOTES.length-1)*KEY_SPACING; // 6*1.35≈8.1
+
+// ─── Three.js escena ────────────────────────────────────────────────
+let scene,camera,renderer,controls;
+const keyboard = new THREE.Group();
+const raycaster = new THREE.Raycaster();
+const pointer   = new THREE.Vector2();
+const synth     = new Tone.Synth().toDestination();
+const pressed   = {}; // nota -> bool
+const keyByNote = {}; // nota -> mesh
+
+let calibrated = false;
+const msg = document.getElementById('msg');
+
+init3D();
+
+// ─── Video + Mediapipe Hands ────────────────────────────────────────
+const canvas2d = document.getElementById('output_canvas');
+const ctx2d    = canvas2d.getContext('2d');
+const videoEl  = document.getElementById('input_video');
+
+const hands = new Hands({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+hands.setOptions({maxNumHands:2,modelComplexity:1,minDetectionConfidence:0.7,minTrackingConfidence:0.7});
+hands.onResults(onResults);
+
+startCamera();
+window.addEventListener('resize',onResize);
+addEventListener('keydown',e=>{
+  if(e.key.toLowerCase()==='r') resetCalibration();
+});
+
+// ─── Calibration state ──────────────────────────────────────────────
+const HOLD_MS = 2000;
+let gestureStart = null;
+function resetCalibration(){
+  calibrated = false;
+  gestureStart = null;
+  msg.style.display='';
+  msg.textContent='Extiende pulgar + índice de ambas manos y mantenlos 2 s para calibrar';
+}
+
+// ─── Inicialización Three.js ────────────────────────────────────────
+function init3D(){
+  scene = new THREE.Scene();
+  scene.background = null;
+  camera = new THREE.PerspectiveCamera(60,innerWidth/innerHeight,0.1,100);
+  camera.position.set(0,10,24);
+
+  renderer = new THREE.WebGLRenderer({canvas:document.getElementById('threeCanvas'),alpha:true,antialias:true});
+  renderer.setPixelRatio(devicePixelRatio);
+  renderer.setSize(innerWidth,innerHeight);
+
+  controls = new OrbitControls(camera,renderer.domElement);
+  controls.target.set(0,1,0);
+  controls.update();
+
+  scene.add(new THREE.AmbientLight(0x404040,1.2));
+  const dir = new THREE.DirectionalLight(0xffffff,0.9);
+  dir.position.set(5,10,7);
+  scene.add(dir);
+
+  createWhiteKeys();
+  createBlackKeys();
+  scene.add(keyboard);
+
+  animate();
+}
+function createWhiteKeys(){
+  const geom = new THREE.BoxGeometry(WHITE_W,WHITE_H,WHITE_D);
+  const mat  = new THREE.MeshPhongMaterial({color:0xffffff,shininess:80});
+  WHITE_NOTES.forEach((note,i)=>{
+    const key = new THREE.Mesh(geom,mat.clone());
+    key.position.set((i-(WHITE_NOTES.length-1)/2)*KEY_SPACING,0,0);
+    key.userData.note = note;
+    keyByNote[note] = key;
+    pressed[note] = false;
+    keyboard.add(key);
+  });
+}
+function createBlackKeys(){
+  const geom = new THREE.BoxGeometry(BLACK_W,BLACK_H,BLACK_D);
+  const mat  = new THREE.MeshPhongMaterial({color:0x000000,shininess:60});
+  BLACK_NOTES.forEach((note,idx)=>{
+    const i = BLACK_OFFSET[idx];
+    const xLeft  = (i-(WHITE_NOTES.length-1)/2)*KEY_SPACING;
+    const xRight = ((i+1)-(WHITE_NOTES.length-1)/2)*KEY_SPACING;
+    const x = (xLeft+xRight)/2;
+    const key = new THREE.Mesh(geom,mat.clone());
+    key.position.set(x,0.15,-1.15);
+    key.userData.note = note;
+    keyByNote[note] = key;
+    pressed[note] = false;
+    keyboard.add(key);
+  });
+}
+
+// ─── Calibración ────────────────────────────────────────────────────
+function screenToWorld(sx,sy,targetZ=0){
+  const ndc = new THREE.Vector3((sx/innerWidth)*2-1, -(sy/innerHeight)*2+1, 0.5);
+  ndc.unproject(camera);
+  const dir = ndc.sub(camera.position).normalize();
+  const t = (targetZ - camera.position.z) / dir.z;
+  return camera.position.clone().add(dir.multiplyScalar(t));
+}
+function calibrate(leftSX,leftSY,rightSX,rightSY){
+  const leftW  = screenToWorld(leftSX,leftSY,0);
+  const rightW = screenToWorld(rightSX,rightSY,0);
+  const span   = rightW.x - leftW.x;
+  const scaleX = span / TOTAL_WHITE_WIDTH;
+  keyboard.scale.set(scaleX,1,1);
+  keyboard.position.x = (leftW.x+rightW.x)/2;
+  calibrated = true;
+  msg.textContent='Calibrado ✓ (pulsa "r" para recalibrar)';
+  setTimeout(()=>msg.style.display='none',2500);
+}
+
+// ─── Hand → Teclado ─────────────────────────────────────────────────
+function handleHandPresses(handsLms){
+  const curPressed = {};
+  for(const n in pressed) curPressed[n] = false;
+
+  handsLms.forEach(lms=>{
+    [4,8,12,16,20].forEach(i=>{ // puntas de dedos
+      const lm = lms[i];
+      const sx = (1-lm.x)*innerWidth;
+      const sy = lm.y*innerHeight;
+      pointer.x = (sx/innerWidth)*2-1;
+      pointer.y = -(sy/innerHeight)*2+1;
+      raycaster.setFromCamera(pointer,camera);
+      const hit = raycaster.intersectObjects(keyboard.children,false)[0];
+      if(hit) curPressed[hit.object.userData.note] = true;
+    });
+  });
+
+  for(const note in pressed){
+    if(curPressed[note] && !pressed[note]){ triggerNote(note); pressed[note]=true; }
+    else if(!curPressed[note] && pressed[note]){ pressed[note]=false; }
+  }
+}
+
+// ─── Tone.js helpers ────────────────────────────────────────────────
+async function playNote(note){ if(Tone.context.state!=='running') await Tone.start(); synth.triggerAttackRelease(note,'8n'); }
+function flashKey(key){ const o=key.material.color.getHex(); key.material.color.set(0xffaa00); setTimeout(()=>key.material.color.set(o),150); }
+function triggerNote(n){ playNote(n); flashKey(keyByNote[n]); }
+
+// ─── Mediapipe callback ─────────────────────────────────────────────
+function onResults(res){
+  const vw = videoEl.videoWidth; if(!vw) return;
+
+  if(canvas2d.width!==innerWidth||canvas2d.height!==innerHeight){ canvas2d.width=innerWidth; canvas2d.height=innerHeight; }
+  ctx2d.save(); ctx2d.clearRect(0,0,canvas2d.width,canvas2d.height);
+  ctx2d.translate(canvas2d.width,0); ctx2d.scale(-1,1);
+  ctx2d.drawImage(videoEl,0,0,canvas2d.width,canvas2d.height);
+  ctx2d.restore();
+
+  const handsLms = res.multiHandLandmarks||[];
+  ctx2d.save(); ctx2d.translate(canvas2d.width,0); ctx2d.scale(-1,1);
+  handsLms.forEach(l=>{drawConnectors(ctx2d,l,HAND_CONNECTIONS,{color:'#00FF00',lineWidth:2}); drawLandmarks(ctx2d,l,{radius:4});});
+  ctx2d.restore();
+
+  // ---------- Calibración con pulgar‑índice ----------
+  if(!calibrated && handsLms.length===2){
+    const mids=[];
+    for(const lms of handsLms){
+      const thumb=lms[4], index=lms[8];
+      // distancia euclídea en normalizado
+      const dist=Math.hypot(thumb.x-index.x, thumb.y-index.y);
+      if(dist<0.05) {gestureStart=null; break;} // dedos demasiado juntos => no gesto
+      const midX=(thumb.x+index.x)/2, midY=(thumb.y+index.y)/2;
+      mids.push({x:midX,y:midY});
+    }
+    if(mids.length===2){
+      if(!gestureStart) gestureStart=performance.now();
+      else if(performance.now()-gestureStart>HOLD_MS){
+        const sx=mids.map(m=>(1-m.x)*innerWidth); // espejo X
+        const sy=mids.map(m=>m.y*innerHeight);
+        const leftIdx=sx[0]<sx[1]?0:1; const rightIdx=1-leftIdx;
+        calibrate(sx[leftIdx],sy[leftIdx],sx[rightIdx],sy[rightIdx]);
+        gestureStart=null;
+      }
+    }
+  }else if(!calibrated){ gestureStart=null; }
+
+  if(calibrated) handleHandPresses(handsLms);
+}
+
+// ─── Cámara + bucle main ────────────────────────────────────────────
+async function startCamera(){
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({video:{width:{ideal:1280},height:{ideal:720},facingMode:'user'},audio:false});
+    videoEl.srcObject=stream; await videoEl.play(); requestAnimationFrame(processFrame);
+  }catch(e){console.error('Camera error',e);} }
+async function processFrame(){ if(videoEl.readyState>=2) await hands.send({image:videoEl}); requestAnimationFrame(processFrame);} 
+function animate(){ requestAnimationFrame(animate); controls.update(); renderer.render(scene,camera);} 
+function onResize(){ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight);} 
+</script>
+</body>
+</html>
