@@ -1,12 +1,266 @@
 <!DOCTYPE html>
 <html lang="es">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Guitarra Tutor AR</title>
-    <script type="module" crossorigin src="/src/main.jsx"></script>
-  </head>
-  <body class="h-screen w-screen overflow-hidden bg-black">
-    <div id="root"></div>
-  </body>
+<head>
+<meta charset="utf-8"/>
+<title>Box‑Tracker 3D + Saco Dinámico</title>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<style>
+  /* --- Estilos combinados de ambos archivos --- */
+  html,body{margin:0;padding:0;overflow:hidden;background:#000;font-family:Arial,Helvetica,sans-serif;}
+  video#input_video{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;z-index:1;}
+  canvas#three_canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:2;}
+  canvas#overlay_canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:3;}
+  #scoreboard{position:absolute;top:10px;left:50%;transform:translateX(-50%);color:#fff;font-size:2rem;font-weight:bold;z-index:4;text-shadow:0 0 10px #000;}
+  #info{position:fixed;top:0;width:100%;padding:.5em 1em;font:900 .9rem system-ui;color:#eee;background:linear-gradient(to bottom,rgba(0,0,0,.65),transparent);pointer-events:none;z-index:5}
+  #info b{color:#2cb}
+</style>
+<!-- ES‑Module‑Shims para import map (Three.js módulos) -->
+<script async src="https://cdn.jsdelivr.net/npm/es-module-shims@1.8.8/dist/es-module-shims.min.js"></script>
+<script type="importmap">
+{
+  "imports": {
+    "three":           "https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js",
+    "three/addons/":   "https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/"
+  }
+}
+</script>
+<!-- Ammo.js (WASM) -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.123.0/examples/js/libs/ammo.wasm.js"></script>
+<!-- MediaPipe Hands & FaceMesh (global) -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+</head>
+<body>
+  <div id="info">Pulsa <b>barra espaciadora</b> para golpear con un puño virtual — o golpea directamente con tu mano real delante de la cámara · Arrastra con el ratón para orbitar</div>
+
+  <video id="input_video" playsinline muted autoplay></video>
+  <canvas id="three_canvas"></canvas>
+  <canvas id="overlay_canvas"></canvas>
+  <div id="scoreboard">0 : 0</div>
+
+<script type="module">
+/************************** 0 · Importaciones ***************************/
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+/************************** 1 · Ammo (WASM) *****************************/
+await Ammo(); // Crea objeto global Ammo
+
+const
+  collisionCfg = new Ammo.btSoftBodyRigidBodyCollisionConfiguration(),
+  dispatcher   = new Ammo.btCollisionDispatcher(collisionCfg),
+  broadphase   = new Ammo.btDbvtBroadphase(),
+  solver       = new Ammo.btSequentialImpulseConstraintSolver(),
+  softSolver   = new Ammo.btDefaultSoftBodySolver(),
+  physicsWorld = new Ammo.btSoftRigidDynamicsWorld(
+                  dispatcher,broadphase,solver,collisionCfg,softSolver);
+physicsWorld.setGravity(new Ammo.btVector3(0,-9.82,0));
+physicsWorld.getWorldInfo().set_m_gravity(new Ammo.btVector3(0,-9.82,0));
+const softBodyHelpers = new Ammo.btSoftBodyHelpers();
+
+/************************** 2 · Three.js escena ************************/ 
+const renderer = new THREE.WebGLRenderer({canvas:document.getElementById('three_canvas'),antialias:true,alpha:true});
+renderer.setPixelRatio(devicePixelRatio);
+renderer.setSize(innerWidth,innerHeight);
+renderer.setClearColor(0x000000,0);
+renderer.shadowMap.enabled = true;
+
+const scene  = new THREE.Scene();
+scene.background = new THREE.Color(0x000000);
+
+const camera = new THREE.PerspectiveCamera(60,innerWidth/innerHeight,0.1,100);
+camera.position.set(0,1.6,3);
+
+const controls = new OrbitControls(camera,renderer.domElement);
+controls.enableDamping = true;
+
+// Luces
+scene.add(new THREE.HemisphereLight(0xffffff,0x444444,1.0));
+const dirLight=new THREE.DirectionalLight(0xffffff,1.2);dirLight.position.set(3,4,2);dirLight.castShadow=true;scene.add(dirLight);
+
+/************************** 3 · Ring ***********************************/
+const ringSize=5;
+const matRing=new THREE.MeshPhongMaterial({color:0x1c1c1c});
+const ring=new THREE.Mesh(new THREE.PlaneGeometry(ringSize,ringSize),matRing);
+ring.rotation.x=-Math.PI/2;ring.receiveShadow=true;scene.add(ring);
+// Postes y cuerdas (re‑uso de Box3D)
+const postGeo=new THREE.CylinderGeometry(0.05,0.05,1.5);
+const postMat=new THREE.MeshBasicMaterial({color:0xffffff});
+[-1,1].forEach(i=>[-1,1].forEach(j=>{const p=new THREE.Mesh(postGeo,postMat);p.position.set(i*ringSize/2,0.75,j*ringSize/2);scene.add(p);}));
+const ropeMat=new THREE.LineBasicMaterial({color:0xffffff});
+function addRope(y){const pts=[[-ringSize/2,y,-ringSize/2],[ringSize/2,y,-ringSize/2],[ringSize/2,y,ringSize/2],[-ringSize/2,y,ringSize/2],[-ringSize/2,y,-ringSize/2]].map(p=>new THREE.Vector3(...p));scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),ropeMat));}
+[0.5,1].forEach(addRope);
+
+/************************** 4 · Saco dinámico (soft‑body) **************/
+const bagRadius=0.35, bagHeight=1.2, segs=24, rows=24;
+const bagGeo = new THREE.CylinderGeometry(bagRadius,bagRadius,bagHeight,segs,rows,true)
+                .translate(0,bagHeight/2,0).rotateY(Math.PI/segs);
+const leatherNormal = new THREE.TextureLoader().load('https://cdn.jsdelivr.net/gh/mrdoob/three.js@r170/examples/textures/Leather_001_NORMAL.jpg');
+leatherNormal.wrapS = leatherNormal.wrapT = THREE.RepeatWrapping; leatherNormal.repeat.set(3,8);
+const bagMat = new THREE.MeshStandardMaterial({color:0x883022,metalness:.1,roughness:.75,normalMap:leatherNormal});
+const bagMesh = new THREE.Mesh(bagGeo,bagMat); bagMesh.castShadow = true; scene.add(bagMesh);
+
+/* Ammo: convertir a soft‑body */
+const ammoSoft = softBodyHelpers.CreateFromTriMesh(
+        physicsWorld.getWorldInfo(),
+        bagGeo.attributes.position.array,
+        bagGeo.index.array,
+        bagGeo.index.array.length/3,
+        true );
+const cfg = ammoSoft.get_m_cfg();
+cfg.set_viterations(25); cfg.set_piterations(20);
+cfg.set_kDF(0.5); cfg.set_kDP(0.01); cfg.set_kPR(250);
+ammoSoft.setTotalMass(100,false); physicsWorld.addSoftBody(ammoSoft,1,-1);
+
+/* Anclar el aro superior */
+const nodes = ammoSoft.get_m_nodes();
+for(let i=0;i<nodes.size();i++){ const node=nodes.at(i); if(node.get_m_x().y()>bagHeight-0.01) node.set_m_im(0); }
+
+/************************** 5 · Guantes del jugador ********************/
+const gloveGeo=new THREE.SphereGeometry(0.12,16,16);
+const playerGloveMat=new THREE.MeshPhongMaterial({color:0x0055ff});
+const leftGlove = new THREE.Mesh(gloveGeo,playerGloveMat);
+const rightGlove= new THREE.Mesh(gloveGeo,playerGloveMat);
+leftGlove.castShadow=rightGlove.castShadow=true; scene.add(leftGlove,rightGlove);
+
+// Rigid‑body asociado al guante derecho para interactuar con el saco
+let gloveBody;initGloveBody();
+function initGloveBody(){
+  const radius=0.12;
+  const shape = new Ammo.btSphereShape(radius); shape.setMargin(0.01);
+  const trans = new Ammo.btTransform(); trans.setIdentity();
+  trans.setOrigin(new Ammo.btVector3(0,1.5,1.5));
+  const motion = new Ammo.btDefaultMotionState(trans);
+  const mass=1, inertia=new Ammo.btVector3();
+  shape.calculateLocalInertia(mass,inertia);
+  const rbInfo = new Ammo.btRigidBodyConstructionInfo(mass,motion,shape,inertia);
+  gloveBody = new Ammo.btRigidBody(rbInfo); gloveBody.setRestitution(0.2);
+  gloveBody.setFriction(0.5);
+  physicsWorld.addRigidBody(gloveBody);
+}
+
+/************************** 6 · MediaPipe tracking *********************/
+const video   = document.getElementById('input_video');
+const overlay = document.getElementById('overlay_canvas');
+const octx    = overlay.getContext('2d',{willReadFrequently:true});
+let handLandmarks=[], handWorldLandmarks=[];
+const hands=new Hands({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+hands.setOptions({maxNumHands:2,modelComplexity:1,minDetectionConfidence:0.7,minTrackingConfidence:0.7});
+hands.onResults(r=>{handLandmarks=r.multiHandLandmarks||[];handWorldLandmarks=r.multiHandWorldLandmarks||[];});
+
+// (cara se conserva por si el usuario lo necesita más adelante)
+let faceLandmarks=null;
+const faceMesh=new FaceMesh({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`});
+faceMesh.setOptions({maxNumFaces:1,refineLandmarks:false,minDetectionConfidence:0.7,minTrackingConfidence:0.7});
+faceMesh.onResults(r=>{faceLandmarks=r.multiFaceLandmarks&&r.multiFaceLandmarks[0]||null;});
+
+navigator.mediaDevices.getUserMedia({video:true}).then(s=>video.srcObject=s).catch(e=>alert('No se pudo acceder a la cámara: '+e));
+
+/************************** 7 · Marcadores / overlay *******************/
+function drawOverlay(){
+  const vw=video.videoWidth,vh=video.videoHeight;if(!vw||!vh)return;
+  const cw=overlay.width=innerWidth,ch=overlay.height=innerHeight;
+  const scale=Math.min(cw/vw,ch/vh);const dw=vw*scale,dh=vh*scale;const dx=(cw-dw)/2,dy=(ch-dh)/2;
+  octx.save();octx.clearRect(0,0,cw,ch);octx.translate(cw,0);octx.scale(-1,1);
+  // manos
+  handLandmarks.forEach(lms=>{
+    octx.strokeStyle='#00ff00';octx.lineWidth=2;HAND_CONNECTIONS.forEach(([i,j])=>{
+      const p1=lms[i],p2=lms[j];octx.beginPath();octx.moveTo(dx+p1.x*dw,dy+p1.y*dh);octx.lineTo(dx+p2.x*dw,dy+p2.y*dh);octx.stroke();
+    });
+  });
+  // cara
+  if(faceLandmarks){octx.strokeStyle='#ffffff';octx.lineWidth=2;faceLandmarks.forEach(p=>{octx.beginPath();octx.arc(dx+p.x*dw,dy+p.y*dh,1,0,2*Math.PI);octx.stroke();});}
+  octx.restore();
+}
+
+/************************** 8 · Marcador de puntuación *****************/
+let playerScore=0,bagScore=0; // bagScore: veces que el saco te "golpea" (rebote)
+const scoreboardElt=document.getElementById('scoreboard');
+function updateScore(){scoreboardElt.textContent=`${playerScore} : ${bagScore}`;}
+
+/************************** 9 · Lógica de juego ************************/
+let prevGlovePos=new THREE.Vector3();
+function updatePlayerGloves(dt){
+  if(!handLandmarks.length) return;
+  // Por convención: mano #0 = derecha
+  const idx=0; const lm=handWorldLandmarks[idx]; if(!lm) return;
+  const base=lm[0];
+  rightGlove.position.set(base.x*2, -base.y*2+2, -base.z*2-0.5);
+  // Sincronizar rigid‑body del guante con Ammo
+  const trans=new Ammo.btTransform(); trans.setIdentity();
+  trans.setOrigin(new Ammo.btVector3(rightGlove.position.x,rightGlove.position.y,rightGlove.position.z));
+  // velocidad
+  const speedVec = rightGlove.position.clone().sub(prevGlovePos);
+  gloveBody.setLinearVelocity(new Ammo.btVector3(speedVec.x/dt,speedVec.y/dt,speedVec.z/dt));
+  gloveBody.setWorldTransform(trans);
+  prevGlovePos.copy(rightGlove.position);
+  // Guante izquierdo por si se usa
+  if(handWorldLandmarks[1]){
+    const baseL=handWorldLandmarks[1][0];
+    leftGlove.position.set(baseL.x*2, -baseL.y*2+2, -baseL.z*2-0.5);
+  }
+  // Detectar golpe al saco (heurístico)
+  const distXZ=Math.hypot(rightGlove.position.x - bagMesh.position.x, rightGlove.position.z - bagMesh.position.z);
+  if(speedVec.length()>0.04 && distXZ < bagRadius+0.15 && rightGlove.position.y > 0.3 && rightGlove.position.y < bagHeight+0.3){
+    playerScore++;updateScore();
+  }
+}
+
+// Golpe con barra espaciadora (re‑encuentro del ejemplo original de Saco)
+addEventListener('keydown',e=>{if(e.code==='Space') gloveBody.setLinearVelocity(new Ammo.btVector3(0,0,-18));});
+
+// Rebote del saco (simplificado): si su centro pasa cierta speed
+let lastBagPos=new THREE.Vector3();
+function detectBagHitBack(dt){
+  const nodes0 = nodes.at(0).get_m_x(); // nodo base para posición aprox.
+  const nowPos = new THREE.Vector3(nodes0.x(),nodes0.y()-bagHeight/2,nodes0.z());
+  const speed = nowPos.clone().sub(lastBagPos).length()/dt;
+  if(speed>2 && nowPos.z>0){ bagScore++; updateScore(); }
+  lastBagPos.copy(nowPos);
+}
+
+/************************** 10 · Animación *****************************/
+const transTemp = new Ammo.btTransform();
+let lastTime=performance.now();
+function tick(){
+  requestAnimationFrame(tick);
+  const now=performance.now(); const dt=(now-lastTime)/1000; lastTime=now;
+  // Paso físico
+  physicsWorld.stepSimulation(dt,10);
+
+  // Sincronizar saco
+  const posAttr=bagGeo.attributes.position;
+  for(let i=0;i<posAttr.count;i++){ const p=nodes.at(i).get_m_x(); posAttr.setXYZ(i,p.x(),p.y(),p.z()); }
+  posAttr.needsUpdate=true; bagGeo.computeVertexNormals();
+
+  // MediaPipe actualiza guantes
+  updatePlayerGloves(dt);
+
+  // Score cuando el saco golpea
+  detectBagHitBack(dt);
+
+  controls.update();
+  renderer.render(scene,camera);
+}
+
+/************************** 11 · Procesamiento de cámara **************/
+async function processFrame(){
+  if(video.readyState>=2){
+    await hands.send({image:video});
+    await faceMesh.send({image:video});
+    drawOverlay();
+  }
+  requestAnimationFrame(processFrame);
+}
+
+video.addEventListener('playing',()=>{lastTime=performance.now();processFrame();tick();});
+
+// Gestión de resize
+addEventListener('resize',()=>{
+  renderer.setSize(innerWidth,innerHeight);
+  camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
+});
+</script>
+</body>
 </html>
